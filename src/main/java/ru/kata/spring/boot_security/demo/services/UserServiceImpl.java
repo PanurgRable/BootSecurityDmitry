@@ -95,19 +95,35 @@ public class UserServiceImpl implements UserService {
     @Transactional
     public void updateUser(Long id, User user, String[] roles) {
         User userDb = findByIdUsers(id);
+
         userDb.setFirstName(user.getFirstName());
         userDb.setLastName(user.getLastName());
         userDb.setEmail(user.getEmail());
         userDb.setUsername(user.getUsername());
-        userDb.setPassword(user.getPassword());
+
+        // Обновляем роли если они пришли
         if (roles != null) {
             Set<Role> roleSet = new HashSet<>();
             for (String s: roles) {
-                roleSet.add(roleService.findRoleByAuthority(s));
+                Role r = roleService.findRoleByAuthority(s);
+                if (r != null) {
+                    roleSet.add(r);
+                }
             }
             userDb.setRoles(roleSet);
         }
-        encodeUserPassword(user);
+
+        // Обработка пароля: если пользователь не заполнил поле пароля — оставляем старый пароль,
+        // иначе кодируем новый и устанавливаем.
+        if (user.getPassword() != null && !user.getPassword().trim().isEmpty()) {
+            // Не кодируем уже закодированный пароль: если начинается с '$' (BCrypt), считаем, что уже закодирован.
+            if (!user.getPassword().startsWith("$")) {
+                userDb.setPassword(passwordEncoder.encode(user.getPassword()));
+            } else {
+                userDb.setPassword(user.getPassword());
+            }
+        } // иначе — оставляем userDb.getPassword() без изменения
+
         userRepository.save(userDb);
     }
 
@@ -115,7 +131,12 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public void deleteByIdUsers(Long id) {
-        userRepository.deleteById(id);
+        userRepository.findById(id).ifPresent(user -> {
+            // сперва удаляем связи в join table, чтобы избежать FK ошибок
+            user.getRoles().clear();
+            userRepository.save(user); // обновляем join table
+            userRepository.deleteById(id);
+        });
     }
 
     // Technical
